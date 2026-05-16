@@ -190,7 +190,7 @@ const wait = (ms: number) =>
 
 async function waitForImageReady(
     imageUrl: string,
-    retries = 10,
+    retries = 12,
     delayMs = 1000,
 ): Promise<void> {
     for (let attempt = 0; attempt <= retries; attempt += 1) {
@@ -270,8 +270,6 @@ async function generatePoster() {
             throw new Error(statusMessage);
         }
 
-        currentLoadingStep.value = 3;
-
         const generatedImageUrl = `https://image.pollinations.ai/p/${encodeURIComponent(data.imagePrompt)}?width=800&height=1200&enhanced=true&model=flux&_ts=${Date.now()}`;
 
         posterData.value = {
@@ -282,6 +280,9 @@ async function generatePoster() {
             reviewText: reviewText.value,
             genre: selectedGenre.value,
         };
+
+        await wait(3000);
+        currentLoadingStep.value = 3;
 
         await waitForImageReady(generatedImageUrl);
 
@@ -313,47 +314,6 @@ async function generatePoster() {
         stopLoadingTimer();
         isLoading.value = false;
     }
-}
-
-async function generatePosterMock() {
-    if (!canGenerate.value) return;
-
-    const sourceReviewText = reviewText.value;
-    const sourceGenre = selectedGenre.value;
-
-    pickRandomStepText();
-    posterData.value = null;
-    isLoading.value = true;
-    currentLoadingStep.value = 1;
-    startLoadingTimer();
-
-    await wait(3500);
-    currentLoadingStep.value = 2;
-
-    await wait(3500);
-    currentLoadingStep.value = 3;
-
-    await wait(3500);
-
-    posterData.value = {
-        title: "THE SEAGULL CHRONICLES",
-        tagline: "They didn't just steal the chips. They stole her dignity.",
-        releaseDate: "APR 18, 2027",
-        imageUrl: "https://picsum.photos/600/900",
-        reviewText: sourceReviewText,
-        genre: sourceGenre,
-    };
-
-    posterHistory.value = [
-        {
-            id: Date.now(),
-            ...posterData.value,
-        },
-        ...posterHistory.value,
-    ].slice(0, 10);
-
-    isLoading.value = false;
-    stopLoadingTimer();
 }
 
 function loadSample(text: string, genre: Genre) {
@@ -748,13 +708,13 @@ onBeforeUnmount(() => {
                                     >
                                         <div
                                             :key="posterData.imageUrl"
-                                            class="poster-reveal-card relative aspect-[2/3] overflow-hidden rounded-2xl border border-slate-700 shadow-2xl shadow-black/60"
+                                            class="group relative aspect-[2/3] overflow-hidden rounded-2xl border border-slate-700 shadow-2xl shadow-black/60 transition-all duration-300 ease-out hover:-translate-y-1 hover:border-slate-500 hover:shadow-[0_24px_60px_rgba(0,0,0,0.65)]"
                                         >
                                             <NuxtImg
                                                 :src="posterData.imageUrl"
                                                 :alt="posterData.title"
                                                 sizes="sm:100px md:500px lg:800px"
-                                                class="h-full w-full object-cover"
+                                                class="h-full w-full object-cover transition-transform duration-500 ease-out group-hover:scale-[1.03]"
                                             />
                                             <div
                                                 class="absolute inset-0 bg-gradient-to-t from-black via-black/15 to-transparent"
@@ -765,7 +725,7 @@ onBeforeUnmount(() => {
                                                 class="absolute inset-x-0 top-0 p-5 text-center"
                                             >
                                                 <p
-                                                    class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-200/95"
+                                                    class="mx-auto max-w-1/3 px-3 py-1 text-xs font-semibold tracking-widest text-white uppercase bg-black/40 backdrop-blur-md rounded-full border border-white/10"
                                                 >
                                                     {{ posterData.releaseDate }}
                                                 </p>
@@ -785,7 +745,7 @@ onBeforeUnmount(() => {
                                                     {{ posterData.title }}
                                                 </h3>
                                                 <p
-                                                    class="mt-3 text-sm italic text-slate-200 sm:text-base"
+                                                    class="mt-3 text-sm italic text-slate-300 sm:text-base"
                                                 >
                                                     "{{ posterData.tagline }}"
                                                 </p>
