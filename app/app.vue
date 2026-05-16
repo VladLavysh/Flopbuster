@@ -166,6 +166,29 @@ const wait = (ms: number) =>
         setTimeout(resolve, ms);
     });
 
+async function waitForImageReady(
+    imageUrl: string,
+    retries = 6,
+    delayMs = 1000,
+): Promise<void> {
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
+        try {
+            await new Promise<void>((resolve, reject) => {
+                const img = new Image();
+                img.onload = () => resolve();
+                img.onerror = () => reject(new Error("Image not ready"));
+                img.src = imageUrl;
+            });
+            return;
+        } catch {
+            if (attempt === retries) {
+                return;
+            }
+            await wait(delayMs);
+        }
+    }
+}
+
 function startLoadingTimer() {
     stopLoadingTimer();
     elapsedSeconds.value = 0;
@@ -182,6 +205,57 @@ function stopLoadingTimer() {
 }
 
 async function generatePoster() {
+    if (!canGenerate.value) return;
+
+    pickRandomStepText();
+
+    posterResponse.value = null;
+    isLoading.value = true;
+    currentLoadingStep.value = 1;
+
+    try {
+        startLoadingTimer();
+
+        // await wait(3500);
+        // currentLoadingStep.value = 2;
+
+        // await wait(3500);
+        // currentLoadingStep.value = 3;
+
+        // await wait(3500);
+
+        const response = await $fetch<PosterResponse>("/api/generate", {
+            method: "POST",
+            body: {
+                reviewText: reviewText.value,
+                genre: selectedGenre.value,
+            },
+        });
+
+        if (!response) return;
+
+        currentLoadingStep.value = 3;
+        await waitForImageReady(response.imageUrl);
+        posterResponse.value = response;
+
+        posterHistory.value = [
+            {
+                id: Date.now(),
+                ...posterResponse.value,
+                reviewText: reviewText.value,
+                genre: selectedGenre.value,
+            },
+            ...posterHistory.value,
+        ].slice(0, 5);
+    } catch (error: any) {
+        console.error("Generation failed:", error);
+    } finally {
+        stopLoadingTimer();
+        isLoading.value = false;
+    }
+}
+
+async function generatePosterMock() {
     if (!canGenerate.value) return;
 
     const sourceReviewText = reviewText.value;
@@ -324,6 +398,7 @@ onBeforeUnmount(() => {
                                 variant="outline"
                                 placeholder="The waiter disappeared for 40 minutes and returned with someone elses soup..."
                                 class="w-full"
+                                maxlength="300"
                             />
                         </div>
 
@@ -533,10 +608,14 @@ onBeforeUnmount(() => {
                                         <NuxtImg
                                             :src="posterResponse.imageUrl"
                                             :alt="posterResponse.title"
-                                            width="600"
-                                            height="900"
+                                            sizes="sm:100px md:500px lg:800px"
                                             class="h-full w-full object-cover"
                                         />
+                                        <!-- <img
+                                            :src="posterResponse.imageUrl"
+                                            :alt="posterResponse.title"
+                                            class="rounded-2xl shadow-2xl"
+                                        /> -->
                                         <div
                                             class="absolute inset-0 bg-gradient-to-t from-black via-black/15 to-transparent"
                                         />
