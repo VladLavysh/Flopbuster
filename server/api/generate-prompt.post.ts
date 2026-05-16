@@ -3,7 +3,7 @@ import { generateText, Output } from "ai";
 import { z } from "zod";
 
 export default defineEventHandler(async (event) => {
-  const { reviewText, genre } = await readBody(event);
+  const { reviewText, genre, currentDateISO } = await readBody(event);
 
   if (!reviewText) {
     throw createError({
@@ -23,6 +23,11 @@ export default defineEventHandler(async (event) => {
       .describe(
         "A hilarious, cinematic tagline that reframes the bad review as an epic movie plot.",
       ),
+    releaseDate: z
+      .string()
+      .describe(
+        "A fictional theatrical release date in format 'DD MMM YYYY' (example: '31 OCT, 2027').",
+      ),
     imagePrompt: z
       .string()
       .describe(
@@ -37,26 +42,25 @@ export default defineEventHandler(async (event) => {
         schema: posterReviewSchema,
       }),
       prompt: `Analyze this terrible customer review: "${reviewText}".
-               The movie genre must be: ${genre}.
-               Convert this review into an epic movie poster concept.`,
+    The movie genre must be: ${genre}.
+    Use this as reference current date: ${currentDateISO || new Date().toISOString()}.
+    Convert this review into an epic movie poster concept.
+    Return: TITLE, TAGLINE, RELEASE DATE, and IMAGE PROMPT.
+    Release date must be fictional and in the future, formatted exactly as 'DD MMM, YYYY'.`,
     });
 
-    const cleanPrompt = output.imagePrompt.replace(/["'#?&]/g, "").trim();
-    const encodedPrompt = encodeURIComponent(
-      `${cleanPrompt}, cinematic lighting, movie poster aesthetic, high resolution`,
-    );
-    const publicImageUrl = `https://image.pollinations.ai/p/${encodedPrompt}?width=800&height=1200&enhanced=true&model=flux`;
+    output.imagePrompt = output.imagePrompt.replace(/["'#?&]/g, "").trim();
 
     return {
-      title: output.title,
-      tagline: output.tagline,
-      imageUrl: publicImageUrl,
+      statusCode: 200,
+      statusMessage: "Success",
+      data: output,
     };
   } catch (error) {
     console.error("AI Generation Error:", error);
     throw createError({
       statusCode: 500,
-      statusMessage: "Failed to summon Hollywood magic. Check your API key.",
+      statusMessage: "Failed to summon Hollywood magic. Try later.",
     });
   }
 });

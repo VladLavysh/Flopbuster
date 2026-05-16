@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 type Genre =
     | "sci-fi"
@@ -17,10 +17,26 @@ type Genre =
 interface PosterResponse {
     title: string;
     tagline: string;
-    imageUrl: string;
+    releaseDate: string;
+    imagePrompt: string;
 }
 
-interface PosterHistoryItem extends PosterResponse {
+interface EndpointResponse {
+    data: PosterResponse;
+    statusCode: number;
+    statusMessage: string;
+}
+
+interface PosterData {
+    title: string;
+    tagline: string;
+    releaseDate: string;
+    imageUrl: string;
+    reviewText: string;
+    genre: Genre;
+}
+
+interface PosterHistoryItem extends PosterData {
     id: number;
     reviewText: string;
     genre: Genre;
@@ -36,10 +52,16 @@ const reviewText = ref("");
 const selectedGenre = ref<Genre>("sci-fi");
 const isLoading = ref(false);
 const currentLoadingStep = ref(1);
-const posterResponse = ref<PosterResponse | null>(null);
+const posterData = ref<PosterData | null>(null);
 const posterHistory = ref<PosterHistoryItem[]>([]);
 const elapsedSeconds = ref(0);
 let loadingTimer: ReturnType<typeof setInterval> | null = null;
+
+const STORAGE_KEY = "flopbuster:posterHistory";
+const ERROR_PLACEHOLDER_IMAGE =
+    "https://picsum.photos/seed/flopbuster-error/800/1200";
+
+const toast = useToast();
 
 const genreOptions: { label: string; value: Genre }[] = [
     { label: "Sci-Fi", value: "sci-fi" },
@@ -168,7 +190,7 @@ const wait = (ms: number) =>
 
 async function waitForImageReady(
     imageUrl: string,
-    retries = 6,
+    retries = 10,
     delayMs = 1000,
 ): Promise<void> {
     for (let attempt = 0; attempt <= retries; attempt += 1) {
@@ -204,50 +226,88 @@ function stopLoadingTimer() {
     }
 }
 
+function setErrorFallbackPoster() {
+    posterData.value = {
+        title: "GENERATION FAILED",
+        tagline: "Hollywood unionized. Try again in a moment.",
+        releaseDate: "COMING SOON",
+        imageUrl: ERROR_PLACEHOLDER_IMAGE,
+        reviewText: reviewText.value,
+        genre: selectedGenre.value,
+    };
+}
+
 async function generatePoster() {
     if (!canGenerate.value) return;
 
     pickRandomStepText();
 
-    posterResponse.value = null;
+    posterData.value = null;
     isLoading.value = true;
     currentLoadingStep.value = 1;
 
     try {
         startLoadingTimer();
 
-        // await wait(3500);
-        // currentLoadingStep.value = 2;
-
-        // await wait(3500);
-        // currentLoadingStep.value = 3;
-
-        // await wait(3500);
-
-        const response = await $fetch<PosterResponse>("/api/generate", {
+        const response: {
+            data: PosterResponse;
+            statusCode: number;
+            statusMessage: string;
+        } = await $fetch<EndpointResponse>("/api/generate-prompt", {
             method: "POST",
             body: {
                 reviewText: reviewText.value,
                 genre: selectedGenre.value,
+                currentDateISO: new Date().toISOString(),
             },
         });
 
-        if (!response) return;
+        currentLoadingStep.value = 2;
+
+        const { data, statusCode, statusMessage } = response;
+
+        if (statusCode >= 400) {
+            throw new Error(statusMessage);
+        }
 
         currentLoadingStep.value = 3;
-        await waitForImageReady(response.imageUrl);
-        posterResponse.value = response;
+
+        const generatedImageUrl = `https://image.pollinations.ai/p/${encodeURIComponent(data.imagePrompt)}?width=800&height=1200&enhanced=true&model=flux&_ts=${Date.now()}`;
+
+        posterData.value = {
+            title: data.title,
+            tagline: data.tagline,
+            releaseDate: data.releaseDate,
+            imageUrl: generatedImageUrl,
+            reviewText: reviewText.value,
+            genre: selectedGenre.value,
+        };
+
+        await waitForImageReady(generatedImageUrl);
 
         posterHistory.value = [
             {
                 id: Date.now(),
-                ...posterResponse.value,
-                reviewText: reviewText.value,
-                genre: selectedGenre.value,
+                ...posterData.value,
             },
             ...posterHistory.value,
-        ].slice(0, 5);
+        ].slice(0, 10);
     } catch (error: any) {
+        console.log("ASDASDSADDASSASAD");
+        const description =
+            error?.data?.statusMessage ||
+            error?.statusMessage ||
+            error?.message ||
+            "Failed to generate poster. Please try again.";
+
+        toast.add({
+            title: "Poster generation failed",
+            description,
+            color: "error",
+            icon: "i-heroicons-exclamation-triangle",
+        });
+
+        setErrorFallbackPoster();
         console.error("Generation failed:", error);
     } finally {
         stopLoadingTimer();
@@ -262,7 +322,7 @@ async function generatePosterMock() {
     const sourceGenre = selectedGenre.value;
 
     pickRandomStepText();
-    posterResponse.value = null;
+    posterData.value = null;
     isLoading.value = true;
     currentLoadingStep.value = 1;
     startLoadingTimer();
@@ -275,21 +335,22 @@ async function generatePosterMock() {
 
     await wait(3500);
 
-    posterResponse.value = {
+    posterData.value = {
         title: "THE SEAGULL CHRONICLES",
         tagline: "They didn't just steal the chips. They stole her dignity.",
+        releaseDate: "APR 18, 2027",
         imageUrl: "https://picsum.photos/600/900",
+        reviewText: sourceReviewText,
+        genre: sourceGenre,
     };
 
     posterHistory.value = [
         {
             id: Date.now(),
-            ...posterResponse.value,
-            reviewText: sourceReviewText,
-            genre: sourceGenre,
+            ...posterData.value,
         },
         ...posterHistory.value,
-    ].slice(0, 5);
+    ].slice(0, 10);
 
     isLoading.value = false;
     stopLoadingTimer();
@@ -305,40 +366,102 @@ function startOver() {
     selectedGenre.value = "sci-fi";
     isLoading.value = false;
     currentLoadingStep.value = 1;
-    posterResponse.value = null;
+    posterData.value = null;
     elapsedSeconds.value = 0;
     stopLoadingTimer();
 }
 
-function downloadPosterByUrl(imageUrl: string, title: string) {
-    const link = document.createElement("a");
-    link.href = imageUrl;
-    link.download = `${title.toLowerCase().replace(/\s+/g, "-")}.jpg`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-}
-
 function loadHistoryItem(item: PosterHistoryItem) {
-    posterResponse.value = {
-        title: item.title,
-        tagline: item.tagline,
-        imageUrl: item.imageUrl,
-    };
+    if (isLoading.value) return;
+
+    isLoading.value = true;
+
+    posterData.value = { ...item };
     reviewText.value = item.reviewText;
     selectedGenre.value = item.genre;
+
     isLoading.value = false;
     currentLoadingStep.value = 1;
+
     stopLoadingTimer();
 }
 
-function downloadPoster() {
-    if (!posterResponse.value) return;
-    downloadPosterByUrl(
-        posterResponse.value.imageUrl,
-        posterResponse.value.title,
+async function downloadPosterByUrl(imageUrl: string, title: string) {
+    try {
+        const response = await fetch(imageUrl);
+        if (!response.ok) throw new Error("Failed to fetch image");
+
+        const blob = await response.blob();
+        const objectUrl = URL.createObjectURL(blob);
+
+        const link = document.createElement("a");
+        link.href = objectUrl;
+        link.download = `${title.toLowerCase().replace(/\s+/g, "-")}.jpg`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+
+        URL.revokeObjectURL(objectUrl);
+    } catch (error) {
+        toast.add({
+            title: "Download failed",
+            description:
+                "Could not download the poster file. Try copying the link.",
+            color: "error",
+            icon: "i-heroicons-exclamation-triangle",
+        });
+        console.error("Download failed:", error);
+    }
+}
+
+async function copyPosterLink() {
+    if (!posterData.value) return;
+
+    try {
+        await navigator.clipboard.writeText(posterData.value.imageUrl);
+        toast.add({
+            title: "Link copied",
+            description: "Poster image link copied to clipboard.",
+            color: "success",
+            icon: "i-heroicons-clipboard-document-check",
+        });
+    } catch (error) {
+        toast.add({
+            title: "Copy failed",
+            description: "Could not copy link. Please copy it manually.",
+            color: "error",
+            icon: "i-heroicons-exclamation-triangle",
+        });
+        console.error("Copy failed:", error);
+    }
+}
+
+async function downloadPoster() {
+    if (!posterData.value) return;
+    await downloadPosterByUrl(
+        posterData.value.imageUrl,
+        posterData.value.title,
     );
 }
+
+watch(
+    posterHistory,
+    (newHistory) => {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(newHistory));
+    },
+    { deep: true },
+);
+
+onMounted(() => {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+
+    try {
+        posterHistory.value = JSON.parse(raw);
+    } catch {
+        localStorage.removeItem(STORAGE_KEY);
+    }
+});
 
 onBeforeUnmount(() => {
     stopLoadingTimer();
@@ -346,393 +469,429 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-    <main
-        class="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-gray-950 text-slate-100"
-    >
-        <div
-            class="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8 lg:py-12"
+    <UApp>
+        <main
+            class="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-gray-950 text-slate-100"
         >
-            <header class="mb-8 lg:mb-10">
-                <p class="text-sm uppercase tracking-[0.3em] text-slate-400">
-                    Flopbuster Studio
-                </p>
-                <h1
-                    class="mt-2 text-3xl font-bold text-white sm:text-4xl lg:text-5xl"
-                >
-                    Flopbuster: The Bad Review Movie Poster Generator
-                </h1>
-                <p class="mt-3 max-w-3xl text-slate-300">
-                    Turn customer chaos into cinematic glory. Paste a dreadful
-                    review, pick a genre, and watch it become an epic poster
-                    concept.
-                </p>
-            </header>
+            <div
+                class="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8 lg:py-12"
+            >
+                <header class="mb-8 lg:mb-10">
+                    <p
+                        class="text-sm uppercase tracking-[0.3em] text-slate-400"
+                    >
+                        Flopbuster Studio
+                    </p>
+                    <h1
+                        class="mt-2 text-3xl font-bold text-white sm:text-4xl lg:text-5xl"
+                    >
+                        Flopbuster: The Bad Review Movie Poster Generator
+                    </h1>
+                    <p class="mt-3 max-w-3xl text-slate-300">
+                        Turn customer chaos into cinematic glory. Paste a
+                        dreadful review, pick a genre, and watch it become an
+                        epic poster concept.
+                    </p>
+                </header>
 
-            <section class="grid grid-cols-1 gap-6 lg:grid-cols-2 lg:gap-8">
-                <UCard
-                    class="border border-slate-800/80 bg-slate-900/70 backdrop-blur"
-                    :ui="{ body: 'space-y-6' }"
-                >
-                    <template #header>
-                        <div class="flex items-center gap-3">
-                            <UIcon
-                                name="i-heroicons-pencil-square"
-                                class="size-5 text-amber-300"
-                            />
-                            <h2 class="text-lg font-semibold text-white">
-                                Your Source Material
-                            </h2>
-                        </div>
-                    </template>
-
-                    <div class="space-y-5">
-                        <div class="space-y-2">
-                            <label class="text-sm font-medium text-slate-200"
-                                >Bad Review</label
-                            >
-                            <UTextarea
-                                v-model="reviewText"
-                                :rows="8"
-                                autoresize
-                                color="neutral"
-                                variant="outline"
-                                placeholder="The waiter disappeared for 40 minutes and returned with someone elses soup..."
-                                class="w-full"
-                                maxlength="300"
-                            />
-                        </div>
-
-                        <div class="space-y-2">
-                            <label class="text-sm font-medium text-slate-200"
-                                >Movie Genre</label
-                            >
-                            <USelect
-                                v-model="selectedGenre"
-                                :items="genreOptions"
-                                option-attribute="label"
-                                value-attribute="value"
-                                class="w-full"
-                            />
-                        </div>
-
-                        <UButton
-                            block
-                            size="lg"
-                            color="primary"
-                            icon="i-heroicons-sparkles"
-                            :loading="isLoading"
-                            :disabled="!canGenerate"
-                            @click="generatePoster"
-                        >
-                            Generate Poster
-                        </UButton>
-                    </div>
-
-                    <template #footer>
-                        <div class="space-y-3">
-                            <p class="text-sm font-semibold text-slate-200">
-                                Need inspiration?
-                            </p>
-                            <div class="space-y-3">
-                                <button
-                                    v-for="sample in visibleSampleReviews"
-                                    :key="sample.title"
-                                    type="button"
-                                    class="w-full rounded-xl border border-slate-800 bg-slate-900/80 p-4 text-left transition hover:border-slate-600 hover:bg-slate-800/80"
-                                    @click="
-                                        loadSample(sample.text, sample.genre)
-                                    "
-                                >
-                                    <div
-                                        class="mb-1 flex items-center justify-between gap-2"
-                                    >
-                                        <p class="font-medium text-slate-100">
-                                            {{ sample.title }}
-                                        </p>
-                                        <span
-                                            class="rounded-full border border-slate-700 px-2 py-0.5 text-xs text-slate-300"
-                                        >
-                                            {{ sample.genre }}
-                                        </span>
-                                    </div>
-                                    <p
-                                        class="line-clamp-2 text-sm text-slate-400"
-                                    >
-                                        {{ sample.text }}
-                                    </p>
-                                </button>
+                <section class="grid grid-cols-1 gap-6 lg:grid-cols-2 lg:gap-8">
+                    <UCard
+                        class="border border-slate-800/80 bg-slate-900/70 backdrop-blur"
+                        :ui="{ body: 'space-y-6' }"
+                    >
+                        <template #header>
+                            <div class="flex items-center gap-3">
+                                <UIcon
+                                    name="i-heroicons-pencil-square"
+                                    class="size-5 text-amber-300"
+                                />
+                                <h2 class="text-lg font-semibold text-white">
+                                    Your Source Material
+                                </h2>
                             </div>
-                        </div>
-                    </template>
-                </UCard>
+                        </template>
 
-                <UCard
-                    class="border border-slate-800/80 bg-slate-900/70 backdrop-blur"
-                    :ui="{ body: 'space-y-6' }"
-                >
-                    <template #header>
-                        <div class="flex items-center gap-3">
-                            <UIcon
-                                name="i-heroicons-film"
-                                class="size-5 text-cyan-300"
-                            />
-                            <h2 class="text-lg font-semibold text-white">
-                                Poster Preview
-                            </h2>
-                        </div>
-                    </template>
+                        <div class="space-y-5">
+                            <div class="space-y-2">
+                                <label
+                                    class="text-sm font-medium text-slate-200"
+                                    >Bad Review</label
+                                >
+                                <UTextarea
+                                    v-model="reviewText"
+                                    :rows="8"
+                                    autoresize
+                                    color="neutral"
+                                    variant="outline"
+                                    placeholder="The waiter disappeared for 40 minutes and returned with someone elses soup..."
+                                    class="w-full"
+                                    maxlength="300"
+                                />
+                            </div>
 
-                    <Transition name="preview-panel" mode="out-in">
-                        <div v-if="isLoading" key="loading" class="space-y-4">
-                            <div
-                                class="loading-poster-shell relative mx-auto aspect-[2/3] w-full max-w-sm overflow-hidden rounded-2xl border border-slate-700 shadow-2xl shadow-black/40"
+                            <div class="space-y-2">
+                                <label
+                                    class="text-sm font-medium text-slate-200"
+                                    >Movie Genre</label
+                                >
+                                <USelect
+                                    v-model="selectedGenre"
+                                    :items="genreOptions"
+                                    option-attribute="label"
+                                    value-attribute="value"
+                                    class="w-full"
+                                />
+                            </div>
+
+                            <UButton
+                                block
+                                size="lg"
+                                color="primary"
+                                icon="i-heroicons-sparkles"
+                                :loading="isLoading"
+                                :disabled="!canGenerate"
+                                @click="generatePoster"
                             >
-                                <USkeleton class="absolute inset-0 z-0" />
+                                Generate Poster
+                            </UButton>
+                        </div>
 
-                                <div
-                                    class="loading-poster-layer loading-poster-layer--1"
-                                    :class="{
-                                        'is-active': currentLoadingStep === 1,
-                                    }"
-                                />
-                                <div
-                                    class="loading-poster-layer loading-poster-layer--2"
-                                    :class="{
-                                        'is-active': currentLoadingStep === 2,
-                                    }"
-                                />
-                                <div
-                                    class="loading-poster-layer loading-poster-layer--3"
-                                    :class="{
-                                        'is-active': currentLoadingStep === 3,
-                                    }"
-                                />
-
-                                <div class="loading-poster-glow" />
-                                <div
-                                    class="absolute left-4 top-4 z-40 rounded-full border border-slate-600/80 bg-slate-900/75 px-3 py-1 text-xs font-medium text-slate-200 backdrop-blur"
-                                >
-                                    Generating: {{ elapsedSeconds }}s
-                                </div>
-                                <div
-                                    class="absolute inset-0 z-30 bg-gradient-to-b from-slate-950/35 via-slate-900/30 to-slate-950/75"
-                                />
-
-                                <div
-                                    class="absolute inset-x-0 bottom-0 z-40 p-4 sm:p-5"
-                                >
-                                    <TransitionGroup
-                                        name="steps-list"
-                                        tag="ol"
-                                        class="space-y-2.5"
-                                        appear
+                        <template #footer>
+                            <div class="space-y-3">
+                                <p class="text-sm font-semibold text-slate-200">
+                                    Need inspiration?
+                                </p>
+                                <div class="space-y-3">
+                                    <button
+                                        v-for="sample in visibleSampleReviews"
+                                        :key="sample.title"
+                                        type="button"
+                                        class="w-full rounded-xl border border-slate-800 bg-slate-900/80 p-4 text-left transition hover:border-slate-600 hover:bg-slate-800/80"
+                                        @click="
+                                            loadSample(
+                                                sample.text,
+                                                sample.genre,
+                                            )
+                                        "
                                     >
-                                        <li
-                                            v-for="(
-                                                step, index
-                                            ) in activeLoadingSteps"
-                                            :key="step"
-                                            :class="[
-                                                'loading-step-card',
-                                                {
-                                                    'loading-step-active':
-                                                        index + 1 ===
-                                                        currentLoadingStep,
-                                                },
-                                            ]"
+                                        <div
+                                            class="mb-1 flex items-center justify-between gap-2"
                                         >
-                                            <div
-                                                class="loading-step-content flex items-start gap-3"
+                                            <p
+                                                class="font-medium text-slate-100"
+                                            >
+                                                {{ sample.title }}
+                                            </p>
+                                            <span
+                                                class="rounded-full border border-slate-700 px-2 py-0.5 text-xs text-slate-300"
+                                            >
+                                                {{ sample.genre }}
+                                            </span>
+                                        </div>
+                                        <p
+                                            class="line-clamp-2 text-sm text-slate-400"
+                                        >
+                                            {{ sample.text }}
+                                        </p>
+                                    </button>
+                                </div>
+                            </div>
+                        </template>
+                    </UCard>
+
+                    <UCard
+                        class="border border-slate-800/80 bg-slate-900/70 backdrop-blur"
+                        :ui="{ body: 'space-y-6' }"
+                    >
+                        <template #header>
+                            <div class="flex items-center gap-3">
+                                <UIcon
+                                    name="i-heroicons-film"
+                                    class="size-5 text-cyan-300"
+                                />
+                                <h2 class="text-lg font-semibold text-white">
+                                    Poster Preview
+                                </h2>
+                            </div>
+                        </template>
+
+                        <Transition name="preview-panel" mode="out-in">
+                            <div
+                                v-if="isLoading"
+                                key="loading"
+                                class="space-y-4"
+                            >
+                                <div
+                                    class="loading-poster-shell relative mx-auto aspect-[2/3] w-full max-w-sm overflow-hidden rounded-2xl border border-slate-700 shadow-2xl shadow-black/40"
+                                >
+                                    <USkeleton class="absolute inset-0 z-0" />
+
+                                    <div
+                                        class="loading-poster-layer loading-poster-layer--1"
+                                        :class="{
+                                            'is-active':
+                                                currentLoadingStep === 1,
+                                        }"
+                                    />
+                                    <div
+                                        class="loading-poster-layer loading-poster-layer--2"
+                                        :class="{
+                                            'is-active':
+                                                currentLoadingStep === 2,
+                                        }"
+                                    />
+                                    <div
+                                        class="loading-poster-layer loading-poster-layer--3"
+                                        :class="{
+                                            'is-active':
+                                                currentLoadingStep === 3,
+                                        }"
+                                    />
+
+                                    <div class="loading-poster-glow" />
+                                    <div
+                                        class="absolute left-4 top-4 z-40 rounded-full border border-slate-600/80 bg-slate-900/75 px-3 py-1 text-xs font-medium text-slate-200 backdrop-blur"
+                                    >
+                                        Generating: {{ elapsedSeconds }}s
+                                    </div>
+                                    <div
+                                        class="absolute inset-0 z-30 bg-gradient-to-b from-slate-950/35 via-slate-900/30 to-slate-950/75"
+                                    />
+
+                                    <div
+                                        class="absolute inset-x-0 bottom-0 z-40 p-4 sm:p-5"
+                                    >
+                                        <TransitionGroup
+                                            name="steps-list"
+                                            tag="ol"
+                                            class="space-y-2.5"
+                                            appear
+                                        >
+                                            <li
+                                                v-for="(
+                                                    step, index
+                                                ) in activeLoadingSteps"
+                                                :key="step"
+                                                :class="[
+                                                    'loading-step-card',
+                                                    {
+                                                        'loading-step-active':
+                                                            index + 1 ===
+                                                            currentLoadingStep,
+                                                    },
+                                                ]"
                                             >
                                                 <div
-                                                    class="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full border text-xs font-semibold"
-                                                    :class="
-                                                        index + 1 <=
-                                                        currentLoadingStep
-                                                            ? 'border-emerald-400 bg-emerald-500/20 text-emerald-200'
-                                                            : 'border-slate-700 bg-slate-800 text-slate-400'
-                                                    "
+                                                    class="loading-step-content flex items-start gap-3"
                                                 >
-                                                    <UIcon
-                                                        v-if="
-                                                            index + 1 <
+                                                    <div
+                                                        class="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full border text-xs font-semibold"
+                                                        :class="
+                                                            index + 1 <=
                                                             currentLoadingStep
+                                                                ? 'border-emerald-400 bg-emerald-500/20 text-emerald-200'
+                                                                : 'border-slate-700 bg-slate-800 text-slate-400'
                                                         "
-                                                        name="i-heroicons-check"
-                                                        class="size-4"
-                                                    />
-                                                    <span v-else>{{
-                                                        index + 1
-                                                    }}</span>
-                                                </div>
-                                                <p
-                                                    class="pt-0.5 text-sm"
-                                                    :class="
-                                                        index + 1 <=
-                                                        currentLoadingStep
-                                                            ? 'text-slate-100'
-                                                            : 'text-slate-500'
-                                                    "
-                                                >
-                                                    {{ step
-                                                    }}<span
-                                                        v-if="
-                                                            index + 1 ===
-                                                            currentLoadingStep
-                                                        "
-                                                        class="loading-dots"
-                                                        aria-hidden="true"
-                                                        >...</span
                                                     >
-                                                </p>
-                                            </div>
-                                        </li>
-                                    </TransitionGroup>
+                                                        <UIcon
+                                                            v-if="
+                                                                index + 1 <
+                                                                currentLoadingStep
+                                                            "
+                                                            name="i-heroicons-check"
+                                                            class="size-4"
+                                                        />
+                                                        <span v-else>{{
+                                                            index + 1
+                                                        }}</span>
+                                                    </div>
+                                                    <p
+                                                        class="pt-0.5 text-sm"
+                                                        :class="
+                                                            index + 1 <=
+                                                            currentLoadingStep
+                                                                ? 'text-slate-100'
+                                                                : 'text-slate-500'
+                                                        "
+                                                    >
+                                                        {{ step
+                                                        }}<span
+                                                            v-if="
+                                                                index + 1 ===
+                                                                currentLoadingStep
+                                                            "
+                                                            class="loading-dots"
+                                                            aria-hidden="true"
+                                                            >...</span
+                                                        >
+                                                    </p>
+                                                </div>
+                                            </li>
+                                        </TransitionGroup>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
 
-                        <div
-                            v-else-if="posterResponse"
-                            key="success"
-                            class="space-y-5"
-                        >
                             <div
-                                class="mx-auto w-full max-w-sm [perspective:1200px]"
+                                v-else-if="posterData"
+                                key="success"
+                                class="space-y-5"
                             >
-                                <Transition name="poster-flip" appear>
-                                    <div
-                                        :key="posterResponse.imageUrl"
-                                        class="poster-reveal-card relative aspect-[2/3] overflow-hidden rounded-2xl border border-slate-700 shadow-2xl shadow-black/60"
-                                    >
-                                        <NuxtImg
-                                            :src="posterResponse.imageUrl"
-                                            :alt="posterResponse.title"
-                                            sizes="sm:100px md:500px lg:800px"
-                                            class="h-full w-full object-cover"
-                                        />
-                                        <!-- <img
-                                            :src="posterResponse.imageUrl"
-                                            :alt="posterResponse.title"
-                                            class="rounded-2xl shadow-2xl"
-                                        /> -->
-                                        <div
-                                            class="absolute inset-0 bg-gradient-to-t from-black via-black/15 to-transparent"
-                                        />
-                                        <div class="poster-sheen" />
-
-                                        <div
-                                            class="absolute inset-x-0 bottom-0 p-5 text-center"
-                                        >
-                                            <p
-                                                class="text-[10px] uppercase tracking-[0.4em] text-slate-300"
-                                            >
-                                                A Flopbuster Original
-                                            </p>
-                                            <h3
-                                                class="mt-2 text-2xl font-extrabold uppercase tracking-[0.16em] text-white sm:text-3xl"
-                                            >
-                                                {{ posterResponse.title }}
-                                            </h3>
-                                            <p
-                                                class="mt-3 text-sm italic text-slate-200 sm:text-base"
-                                            >
-                                                "{{ posterResponse.tagline }}"
-                                            </p>
-                                        </div>
-                                    </div>
-                                </Transition>
-                            </div>
-
-                            <div class="flex flex-col gap-3 sm:flex-row">
-                                <UButton
-                                    block
-                                    color="primary"
-                                    icon="i-heroicons-arrow-down-tray"
-                                    @click="downloadPoster"
-                                >
-                                    Download Poster
-                                </UButton>
-                                <UButton
-                                    block
-                                    color="neutral"
-                                    variant="soft"
-                                    icon="i-heroicons-arrow-path"
-                                    @click="startOver"
-                                >
-                                    Start Over
-                                </UButton>
-                            </div>
-                        </div>
-
-                        <div
-                            v-else
-                            key="empty"
-                            class="flex min-h-[420px] flex-col items-center justify-center rounded-2xl border border-dashed border-slate-700 bg-slate-950/40 p-6 text-center"
-                        >
-                            <UIcon
-                                name="i-heroicons-photo"
-                                class="mb-4 size-10 text-slate-500"
-                            />
-                            <p class="text-lg font-semibold text-slate-200">
-                                Your blockbuster failure poster will appear
-                                here.
-                            </p>
-                            <p class="mt-2 max-w-md text-sm text-slate-400">
-                                Add a hilariously bad review on the left, choose
-                                a genre, and hit Generate Poster.
-                            </p>
-                        </div>
-                    </Transition>
-
-                    <div class="border-t border-slate-800/90 pt-4">
-                        <div class="mb-3 flex items-center gap-2">
-                            <UIcon
-                                name="i-heroicons-clock"
-                                class="size-4 text-slate-400"
-                            />
-                            <p class="text-sm font-semibold text-slate-200">
-                                Recent Posters ({{ posterHistory.length }}/5)
-                            </p>
-                        </div>
-
-                        <div
-                            v-if="posterHistory.length"
-                            class="flex items-center overflow-x-auto p-2"
-                        >
-                            <button
-                                v-for="(item, index) in posterHistory"
-                                :key="item.id"
-                                type="button"
-                                :class="[
-                                    'group relative h-28 w-[84px] shrink-0 overflow-hidden rounded-lg border border-slate-700 shadow-lg transition-transform duration-300 hover:z-20 hover:scale-105 hover:border-slate-500 cursor-pointer',
-                                    index === 0 ? '' : '-ml-5',
-                                ]"
-                                :title="`Load ${item.title}`"
-                                @click="loadHistoryItem(item)"
-                            >
-                                <NuxtImg
-                                    :src="item.imageUrl"
-                                    :alt="item.title"
-                                    width="168"
-                                    height="252"
-                                    class="h-full w-full object-cover"
-                                />
                                 <div
-                                    class="absolute inset-0 bg-gradient-to-t from-black/60 via-black/20 to-transparent opacity-0 transition-opacity duration-200 group-hover:opacity-100"
-                                />
-                            </button>
-                        </div>
+                                    class="mx-auto w-full max-w-sm [perspective:1200px]"
+                                >
+                                    <Transition
+                                        name="poster-flip"
+                                        mode="out-in"
+                                        type="transition"
+                                        appear
+                                    >
+                                        <div
+                                            :key="posterData.imageUrl"
+                                            class="poster-reveal-card relative aspect-[2/3] overflow-hidden rounded-2xl border border-slate-700 shadow-2xl shadow-black/60"
+                                        >
+                                            <NuxtImg
+                                                :src="posterData.imageUrl"
+                                                :alt="posterData.title"
+                                                sizes="sm:100px md:500px lg:800px"
+                                                class="h-full w-full object-cover"
+                                            />
+                                            <div
+                                                class="absolute inset-0 bg-gradient-to-t from-black via-black/15 to-transparent"
+                                            />
+                                            <div class="poster-sheen" />
 
-                        <p v-else class="text-xs text-slate-500">
-                            Your generated posters will appear here as a quick
-                            download history.
-                        </p>
-                    </div>
-                </UCard>
-            </section>
-        </div>
-    </main>
+                                            <div
+                                                class="absolute inset-x-0 top-0 p-5 text-center"
+                                            >
+                                                <p
+                                                    class="text-xs font-semibold uppercase tracking-[0.35em] text-slate-200/95"
+                                                >
+                                                    {{ posterData.releaseDate }}
+                                                </p>
+                                            </div>
+
+                                            <div
+                                                class="absolute inset-x-0 bottom-0 p-5 text-center"
+                                            >
+                                                <p
+                                                    class="text-[10px] uppercase tracking-[0.4em] text-slate-300"
+                                                >
+                                                    A Flopbuster Original
+                                                </p>
+                                                <h3
+                                                    class="mt-2 text-2xl font-extrabold uppercase tracking-[0.16em] text-white sm:text-3xl"
+                                                >
+                                                    {{ posterData.title }}
+                                                </h3>
+                                                <p
+                                                    class="mt-3 text-sm italic text-slate-200 sm:text-base"
+                                                >
+                                                    "{{ posterData.tagline }}"
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </Transition>
+                                </div>
+
+                                <div class="flex flex-col gap-3 sm:flex-row">
+                                    <UButton
+                                        block
+                                        color="primary"
+                                        icon="i-heroicons-arrow-down-tray"
+                                        @click="downloadPoster"
+                                    >
+                                        Download Poster
+                                    </UButton>
+                                    <UButton
+                                        block
+                                        color="neutral"
+                                        variant="soft"
+                                        icon="i-heroicons-link"
+                                        @click="copyPosterLink"
+                                    >
+                                        Copy Image Link
+                                    </UButton>
+                                </div>
+                            </div>
+
+                            <div
+                                v-else
+                                key="empty"
+                                class="flex min-h-[420px] flex-col items-center justify-center rounded-2xl border border-dashed border-slate-700 bg-slate-950/40 p-6 text-center"
+                            >
+                                <UIcon
+                                    name="i-heroicons-photo"
+                                    class="mb-4 size-10 text-slate-500"
+                                />
+                                <p class="text-lg font-semibold text-slate-200">
+                                    Your blockbuster failure poster will appear
+                                    here.
+                                </p>
+                                <p class="mt-2 max-w-md text-sm text-slate-400">
+                                    Add a hilariously bad review on the left,
+                                    choose a genre, and hit Generate Poster.
+                                </p>
+                            </div>
+                        </Transition>
+
+                        <div class="border-t border-slate-800/90 pt-4">
+                            <div class="mb-3 flex items-center gap-2">
+                                <UIcon
+                                    name="i-heroicons-clock"
+                                    class="size-4 text-slate-400"
+                                />
+                                <p class="text-sm font-semibold text-slate-200">
+                                    Recent Posters ({{
+                                        posterHistory.length
+                                    }}/10)
+                                </p>
+                            </div>
+
+                            <div
+                                v-if="posterHistory.length"
+                                class="flex items-center overflow-x-auto p-2"
+                            >
+                                <button
+                                    v-for="(item, index) in posterHistory"
+                                    :key="item.id"
+                                    type="button"
+                                    :class="[
+                                        'group relative h-28 w-[84px] shrink-0 overflow-hidden rounded-lg border border-slate-700 shadow-lg transition-transform duration-300',
+                                        index === 0 ? '' : '-ml-5',
+                                        isLoading
+                                            ? 'opacity-50'
+                                            : 'hover:z-20 hover:scale-105 hover:border-slate-500 cursor-pointer',
+                                    ]"
+                                    :title="`Load ${item.title}`"
+                                    :disabled="isLoading"
+                                    @click="loadHistoryItem(item)"
+                                >
+                                    <NuxtImg
+                                        :src="item.imageUrl"
+                                        :alt="item.title"
+                                        width="168"
+                                        height="252"
+                                        class="h-full w-full object-cover"
+                                    />
+                                    <div
+                                        class="absolute inset-0 bg-gradient-to-t from-black/60 via-black/20 to-transparent opacity-0 transition-opacity duration-200 group-hover:opacity-100"
+                                    />
+                                </button>
+                            </div>
+
+                            <p v-else class="text-xs text-slate-500">
+                                Your generated posters will appear here as a
+                                quick download history.
+                            </p>
+                        </div>
+                    </UCard>
+                </section>
+            </div>
+        </main>
+
+        <UToaster />
+    </UApp>
 </template>
 
 <style scoped>
@@ -955,9 +1114,9 @@ onBeforeUnmount(() => {
 
 .poster-flip-enter-active {
     transition:
-        transform 0.85s cubic-bezier(0.22, 0.88, 0.3, 1),
-        opacity 0.65s ease,
-        filter 0.85s ease;
+        transform 0.65s cubic-bezier(0.22, 0.88, 0.3, 1),
+        opacity 0.45s ease,
+        filter 0.65s ease;
 }
 
 .poster-flip-enter-from {
@@ -970,6 +1129,22 @@ onBeforeUnmount(() => {
     opacity: 1;
     transform: rotateY(0deg) rotateX(0deg) scale(1) translateY(0);
     filter: blur(0) saturate(1);
+}
+
+.poster-flip-leave-active {
+    transition:
+        opacity 0.18s ease,
+        transform 0.18s ease;
+}
+
+.poster-flip-leave-from {
+    opacity: 1;
+    transform: scale(1);
+}
+
+.poster-flip-leave-to {
+    opacity: 0;
+    transform: scale(0.985);
 }
 
 .poster-sheen {
