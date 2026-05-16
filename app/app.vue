@@ -20,6 +20,12 @@ interface PosterResponse {
     imageUrl: string;
 }
 
+interface PosterHistoryItem extends PosterResponse {
+    id: number;
+    reviewText: string;
+    genre: Genre;
+}
+
 interface SampleReview {
     title: string;
     text: string;
@@ -31,6 +37,7 @@ const selectedGenre = ref<Genre>("sci-fi");
 const isLoading = ref(false);
 const currentLoadingStep = ref(1);
 const posterResponse = ref<PosterResponse | null>(null);
+const posterHistory = ref<PosterHistoryItem[]>([]);
 const elapsedSeconds = ref(0);
 let loadingTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -177,6 +184,9 @@ function stopLoadingTimer() {
 async function generatePoster() {
     if (!canGenerate.value) return;
 
+    const sourceReviewText = reviewText.value;
+    const sourceGenre = selectedGenre.value;
+
     pickRandomStepText();
     posterResponse.value = null;
     isLoading.value = true;
@@ -197,6 +207,16 @@ async function generatePoster() {
         imageUrl: "https://picsum.photos/600/900",
     };
 
+    posterHistory.value = [
+        {
+            id: Date.now(),
+            ...posterResponse.value,
+            reviewText: sourceReviewText,
+            genre: sourceGenre,
+        },
+        ...posterHistory.value,
+    ].slice(0, 5);
+
     isLoading.value = false;
     stopLoadingTimer();
 }
@@ -216,15 +236,34 @@ function startOver() {
     stopLoadingTimer();
 }
 
-function downloadPoster() {
-    if (!posterResponse.value) return;
-
+function downloadPosterByUrl(imageUrl: string, title: string) {
     const link = document.createElement("a");
-    link.href = posterResponse.value.imageUrl;
-    link.download = `${posterResponse.value.title.toLowerCase().replace(/\s+/g, "-")}.jpg`;
+    link.href = imageUrl;
+    link.download = `${title.toLowerCase().replace(/\s+/g, "-")}.jpg`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+}
+
+function loadHistoryItem(item: PosterHistoryItem) {
+    posterResponse.value = {
+        title: item.title,
+        tagline: item.tagline,
+        imageUrl: item.imageUrl,
+    };
+    reviewText.value = item.reviewText;
+    selectedGenre.value = item.genre;
+    isLoading.value = false;
+    currentLoadingStep.value = 1;
+    stopLoadingTimer();
+}
+
+function downloadPoster() {
+    if (!posterResponse.value) return;
+    downloadPosterByUrl(
+        posterResponse.value.imageUrl,
+        posterResponse.value.title,
+    );
 }
 
 onBeforeUnmount(() => {
@@ -566,6 +605,51 @@ onBeforeUnmount(() => {
                             </p>
                         </div>
                     </Transition>
+
+                    <div class="border-t border-slate-800/90 pt-4">
+                        <div class="mb-3 flex items-center gap-2">
+                            <UIcon
+                                name="i-heroicons-clock"
+                                class="size-4 text-slate-400"
+                            />
+                            <p class="text-sm font-semibold text-slate-200">
+                                Recent Posters ({{ posterHistory.length }}/5)
+                            </p>
+                        </div>
+
+                        <div
+                            v-if="posterHistory.length"
+                            class="flex items-center overflow-x-auto p-2"
+                        >
+                            <button
+                                v-for="(item, index) in posterHistory"
+                                :key="item.id"
+                                type="button"
+                                :class="[
+                                    'group relative h-28 w-[84px] shrink-0 overflow-hidden rounded-lg border border-slate-700 shadow-lg transition-transform duration-300 hover:z-20 hover:scale-105 hover:border-slate-500 cursor-pointer',
+                                    index === 0 ? '' : '-ml-5',
+                                ]"
+                                :title="`Load ${item.title}`"
+                                @click="loadHistoryItem(item)"
+                            >
+                                <NuxtImg
+                                    :src="item.imageUrl"
+                                    :alt="item.title"
+                                    width="168"
+                                    height="252"
+                                    class="h-full w-full object-cover"
+                                />
+                                <div
+                                    class="absolute inset-0 bg-gradient-to-t from-black/60 via-black/20 to-transparent opacity-0 transition-opacity duration-200 group-hover:opacity-100"
+                                />
+                            </button>
+                        </div>
+
+                        <p v-else class="text-xs text-slate-500">
+                            Your generated posters will appear here as a quick
+                            download history.
+                        </p>
+                    </div>
                 </UCard>
             </section>
         </div>
@@ -787,6 +871,7 @@ onBeforeUnmount(() => {
 .poster-reveal-card {
     transform-style: preserve-3d;
     backface-visibility: hidden;
+    animation: poster-idle-shadow 10s ease-in-out infinite 2s;
 }
 
 .poster-flip-enter-active {
@@ -829,6 +914,21 @@ onBeforeUnmount(() => {
     }
     to {
         transform: translateX(130%);
+    }
+}
+
+@keyframes poster-idle-shadow {
+    0%,
+    60% {
+        box-shadow: 0 20px 45px rgb(0 0 0 / 0.6);
+    }
+    74% {
+        box-shadow:
+            0 22px 50px rgb(0 0 0 / 0.7),
+            0 0 18px rgb(56 189 248 / 0.6);
+    }
+    100% {
+        box-shadow: 0 20px 45px rgb(0 0 0 / 0.6);
     }
 }
 </style>
