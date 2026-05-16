@@ -60,7 +60,8 @@ export default defineEventHandler(async (event) => {
     console.error("AI Generation Error:", error);
     throw createError({
       statusCode: 500,
-      statusMessage: "Failed to summon Hollywood magic. Try later.",
+      statusMessage:
+        "Failed to summon Hollywood magic. Try later. (API Limit Exceeded)",
     });
   }
 });
