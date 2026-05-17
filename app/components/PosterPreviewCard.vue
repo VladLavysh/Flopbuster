@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import type { PosterData, PosterHistoryItem } from "../shared/types";
 
+const posterContainer = ref<HTMLElement | null>(null);
+
+defineExpose({ posterContainer });
+
 const props = defineProps<{
     isLoading: boolean;
     currentLoadingStep: number;
@@ -134,6 +138,7 @@ const emit = defineEmits<{
                         <div
                             :key="posterData.imageUrl"
                             class="group relative aspect-2/3 overflow-hidden rounded-2xl border border-slate-700 shadow-2xl shadow-black/60 transition-all duration-300 ease-out hover:-translate-y-1 hover:border-slate-500 hover:shadow-[0_24px_60px_rgba(0,0,0,0.65)]"
+                            ref="posterContainer"
                         >
                             <NuxtImg
                                 :src="posterData.imageUrl"

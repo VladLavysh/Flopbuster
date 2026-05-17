@@ -1,10 +1,13 @@
 <script setup lang="ts">
+import { toPng } from "html-to-image";
+
 import type {
     Genre,
     PosterData,
     PosterHistoryItem,
     SampleReview,
 } from "./shared/types";
+import type PosterPreviewCard from "./components/PosterPreviewCard.vue";
 
 interface PosterResponse {
     title: string;
@@ -26,6 +29,9 @@ const currentLoadingStep = ref(1);
 const posterData = ref<PosterData | null>(null);
 const posterHistory = ref<PosterHistoryItem[]>([]);
 const elapsedSeconds = ref(0);
+const posterContainerRef = ref<InstanceType<typeof PosterPreviewCard> | null>(
+    null,
+);
 let loadingTimer: ReturnType<typeof setInterval> | null = null;
 
 const STORAGE_KEY = "flopbuster:posterHistory";
@@ -253,7 +259,7 @@ async function generatePoster() {
             genre: selectedGenre.value,
         };
 
-        await wait(3000);
+        await wait(3000); // Artificial delay due to unpredictable Pollinations.ai response times
         currentLoadingStep.value = 3;
 
         await waitForImageReady(generatedImageUrl);
@@ -266,7 +272,6 @@ async function generatePoster() {
             ...posterHistory.value,
         ].slice(0, 10);
     } catch (error: any) {
-        console.log("ASDASDSADDASSASAD");
         const description =
             error?.data?.statusMessage ||
             error?.statusMessage ||
@@ -293,16 +298,6 @@ function loadSample(text: string, genre: Genre) {
     selectedGenre.value = genre;
 }
 
-function startOver() {
-    reviewText.value = "";
-    selectedGenre.value = "sci-fi";
-    isLoading.value = false;
-    currentLoadingStep.value = 1;
-    posterData.value = null;
-    elapsedSeconds.value = 0;
-    stopLoadingTimer();
-}
-
 function loadHistoryItem(item: PosterHistoryItem) {
     if (isLoading.value) return;
 
@@ -318,22 +313,26 @@ function loadHistoryItem(item: PosterHistoryItem) {
     stopLoadingTimer();
 }
 
-async function downloadPosterByUrl(imageUrl: string, title: string) {
+async function downloadPoster() {
     try {
-        const response = await fetch(imageUrl);
-        if (!response.ok) throw new Error("Failed to fetch image");
+        const posterContainer = posterContainerRef.value?.posterContainer;
 
-        const blob = await response.blob();
-        const objectUrl = URL.createObjectURL(blob);
+        if (!posterContainer || !posterData.value) {
+            throw new Error("Poster container or data is not available");
+        }
 
+        const dataUrl = await toPng(posterContainer, {
+            cacheBust: true,
+            quality: 0.95,
+        });
+        const fileName = posterData.value.title
+            .toLowerCase()
+            .replace(/[^a-z0-9]/g, "_");
         const link = document.createElement("a");
-        link.href = objectUrl;
-        link.download = `${title.toLowerCase().replace(/\s+/g, "-")}.jpg`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
 
-        URL.revokeObjectURL(objectUrl);
+        link.download = `flopbuster_${fileName}.png`;
+        link.href = dataUrl;
+        link.click();
     } catch (error) {
         toast.add({
             title: "Download failed",
@@ -366,14 +365,6 @@ async function copyPosterLink() {
         });
         console.error("Copy failed:", error);
     }
-}
-
-async function downloadPoster() {
-    if (!posterData.value) return;
-    await downloadPosterByUrl(
-        posterData.value.imageUrl,
-        posterData.value.title,
-    );
 }
 
 watch(
@@ -441,6 +432,8 @@ onBeforeUnmount(() => {
                     />
 
                     <PosterPreviewCard
+                        ref="posterContainerRef"
+                        :key="posterData?.imageUrl"
                         :is-loading="isLoading"
                         :current-loading-step="currentLoadingStep"
                         :active-loading-steps="activeLoadingSteps"
