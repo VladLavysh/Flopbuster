@@ -245,8 +245,9 @@ const emit = defineEmits<{
                         index === 0 ? '' : '-ml-5',
                         isLoading
                             ? 'opacity-50'
-                            : 'cursor-pointer hover:z-20 hover:scale-105 hover:border-slate-500',
+                            : 'cursor-pointer hover:z-20 hover:scale- hover:border-slate-500',
                     ]"
+                    :style="{ transform: `scale(${1 + index * 0.015})` }"
                     :title="`Load ${item.title}`"
                     :disabled="isLoading"
                     @click="emit('loadHistory', item)"

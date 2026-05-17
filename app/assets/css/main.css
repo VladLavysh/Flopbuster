@@ -1,2 +1,10 @@
+html {
+    color-scheme: light dark;
+}
+textarea,
+input {
+    color-scheme: dark;
+}
+
 @import "tailwindcss";
 @import "@nuxt/ui";

@@ -189,6 +189,15 @@ async function waitForImageReady(
     }
 }
 
+function scrollToTheBottom() {
+    if (window.innerWidth <= 1023) {
+        window.scrollTo({
+            top: document.body.scrollHeight,
+            behavior: "smooth",
+        });
+    }
+}
+
 function startLoadingTimer() {
     stopLoadingTimer();
     elapsedSeconds.value = 0;
@@ -220,14 +229,20 @@ async function generatePoster() {
 
     pickRandomStepText();
 
+    startLoadingTimer();
+
+    scrollToTheBottom();
+
     posterData.value = null;
     isLoading.value = true;
     currentLoadingStep.value = 1;
 
     try {
-        startLoadingTimer();
-
-        const response: {
+        const {
+            data,
+            statusCode,
+            statusMessage,
+        }: {
             data: PosterResponse;
             statusCode: number;
             statusMessage: string;
@@ -240,13 +255,11 @@ async function generatePoster() {
             },
         });
 
-        currentLoadingStep.value = 2;
-
-        const { data, statusCode, statusMessage } = response;
-
         if (statusCode >= 400) {
             throw new Error(statusMessage);
         }
+
+        currentLoadingStep.value = 2;
 
         const generatedImageUrl = `https://image.pollinations.ai/p/${encodeURIComponent(data.imagePrompt)}?width=800&height=1200&enhanced=true&model=flux&_ts=${Date.now()}`;
 
@@ -265,11 +278,11 @@ async function generatePoster() {
         await waitForImageReady(generatedImageUrl);
 
         posterHistory.value = [
+            ...posterHistory.value,
             {
                 id: Date.now(),
                 ...posterData.value,
             },
-            ...posterHistory.value,
         ].slice(0, 10);
     } catch (error: any) {
         const description =
