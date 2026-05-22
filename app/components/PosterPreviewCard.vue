@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import {
+    isPollinationsUrl,
+    POLLINATIONS_IMAGE_HINT,
+} from "#shared/poster-guard";
 import type { PosterData, PosterHistoryItem } from "../shared/types";
 
 const posterContainer = ref<HTMLElement | null>(null);
@@ -20,6 +24,38 @@ const emit = defineEmits<{
     (e: "copyLink"): void;
     (e: "loadHistory", item: PosterHistoryItem): void;
 }>();
+
+type ImageStatus = "loading" | "ready" | "error";
+
+const imageStatus = ref<ImageStatus>("loading");
+const posterImageRef = ref<HTMLImageElement | null>(null);
+
+const showPollinationsHint = computed(
+    () =>
+        props.posterData?.imageUrl &&
+        isPollinationsUrl(props.posterData.imageUrl),
+);
+
+watch(
+    () => props.posterData?.imageUrl,
+    async (url) => {
+        if (!url) return;
+        imageStatus.value = "loading";
+        await nextTick();
+        const img = posterImageRef.value;
+        if (img?.complete && img.naturalWidth > 0) {
+            onPosterImageLoad();
+        }
+    },
+);
+
+function onPosterImageLoad() {
+    imageStatus.value = "ready";
+}
+
+function onPosterImageError() {
+    imageStatus.value = "error";
+}
 </script>
 
 <template>
@@ -128,7 +164,7 @@ const emit = defineEmits<{
             </div>
 
             <div v-else-if="posterData" key="success" class="space-y-5">
-                <div class="mx-auto w-full max-w-sm perspective-distant">
+                <div class="mx-auto w-full max-w-sm space-y-2 perspective-distant">
                     <Transition
                         name="poster-flip"
                         mode="out-in"
@@ -137,22 +173,67 @@ const emit = defineEmits<{
                     >
                         <div
                             :key="posterData.imageUrl"
-                            class="group relative aspect-2/3 overflow-hidden rounded-2xl border border-slate-700 shadow-2xl shadow-black/60 transition-all duration-300 ease-out hover:-translate-y-1 hover:border-slate-500 hover:shadow-[0_24px_60px_rgba(0,0,0,0.65)]"
+                            class="group relative aspect-2/3 overflow-hidden rounded-2xl border border-slate-700 bg-slate-950 shadow-2xl shadow-black/60 transition-all duration-300 ease-out hover:-translate-y-1 hover:border-slate-500 hover:shadow-[0_24px_60px_rgba(0,0,0,0.65)]"
                             ref="posterContainer"
                         >
-                            <NuxtImg
-                                :src="posterData.imageUrl"
-                                :alt="posterData.title"
-                                sizes="sm:100px md:500px lg:800px"
-                                class="h-full w-full object-cover transition-transform duration-500 ease-out group-hover:scale-[1.03]"
-                            />
-                            <div
-                                class="absolute inset-0 bg-linear-to-t from-black via-black/15 to-transparent"
-                            />
-                            <div class="poster-sheen" />
+                            <div class="absolute inset-0 z-0">
+                                <div
+                                    v-if="imageStatus === 'loading'"
+                                    class="poster-image-loading absolute inset-0 flex flex-col items-center justify-center gap-3 bg-slate-900"
+                                    aria-live="polite"
+                                    aria-busy="true"
+                                >
+                                    <UIcon
+                                        name="i-heroicons-photo"
+                                        class="size-9 text-slate-500 animate-pulse"
+                                    />
+                                    <p
+                                        class="text-xs font-medium tracking-wide text-slate-400 uppercase"
+                                    >
+                                        Rendering poster art
+                                    </p>
+                                </div>
+
+                                <div
+                                    v-else-if="imageStatus === 'error'"
+                                    class="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-slate-900 p-6 text-center"
+                                >
+                                    <UIcon
+                                        name="i-heroicons-photo"
+                                        class="size-10 text-slate-500"
+                                    />
+                                    <p class="text-sm text-slate-300">
+                                        Image still cooking
+                                    </p>
+                                    <p class="text-xs text-slate-500">
+                                        Try refreshing in a moment
+                                    </p>
+                                </div>
+
+                                <img
+                                    ref="posterImageRef"
+                                    :src="posterData.imageUrl"
+                                    :alt="posterData.title"
+                                    width="800"
+                                    height="1200"
+                                    decoding="async"
+                                    class="h-full w-full object-cover transition-all duration-500 ease-out group-hover:scale-[1.03]"
+                                    :class="{
+                                        'opacity-0': imageStatus !== 'ready',
+                                        'opacity-100': imageStatus === 'ready',
+                                    }"
+                                    @load="onPosterImageLoad"
+                                    @error="onPosterImageError"
+                                />
+                            </div>
 
                             <div
-                                class="absolute inset-x-0 top-0 p-5 text-center"
+                                class="pointer-events-none absolute inset-0 z-20 bg-linear-to-t from-black via-black/15 to-transparent"
+                            />
+                            <div class="poster-sheen z-20" />
+
+                            <div
+                                class="pointer-events-none absolute inset-x-0 top-0 z-30 p-5 text-center"
                             >
                                 <p
                                     class="mx-auto max-w-1/3 rounded-full border border-white/10 bg-black/40 px-3 py-1 text-xs font-semibold tracking-widest text-white uppercase backdrop-blur-md"
@@ -162,7 +243,7 @@ const emit = defineEmits<{
                             </div>
 
                             <div
-                                class="absolute inset-x-0 bottom-0 p-5 text-center"
+                                class="pointer-events-none absolute inset-x-0 bottom-0 z-30 p-5 text-center"
                             >
                                 <p
                                     class="text-[10px] uppercase tracking-[0.4em] text-slate-300"
@@ -182,6 +263,27 @@ const emit = defineEmits<{
                             </div>
                         </div>
                     </Transition>
+
+                    <p
+                        v-if="showPollinationsHint"
+                        class="flex items-start justify-center gap-2 px-1 text-center text-xs text-slate-400"
+                    >
+                        <UTooltip :text="POLLINATIONS_IMAGE_HINT">
+                            <button
+                                type="button"
+                                class="mt-0.5 flex shrink-0 text-slate-400 transition hover:text-slate-200"
+                                aria-label="About pollinations.ai image loading"
+                            >
+                                <UIcon
+                                    name="i-heroicons-information-circle"
+                                    class="size-4"
+                                />
+                            </button>
+                        </UTooltip>
+                        <span>
+                            Art appears when ready
+                        </span>
+                    </p>
                 </div>
 
                 <div class="flex flex-col gap-3 sm:flex-row">
@@ -524,6 +626,30 @@ const emit = defineEmits<{
 .poster-flip-leave-to {
     opacity: 0;
     transform: scale(0.985);
+}
+
+.poster-image-loading::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+        105deg,
+        transparent 38%,
+        rgb(148 163 184 / 0.12) 48%,
+        rgb(148 163 184 / 0.2) 52%,
+        transparent 62%
+    );
+    background-size: 220% 100%;
+    animation: poster-image-shimmer 1.8s ease-in-out infinite;
+}
+
+@keyframes poster-image-shimmer {
+    0% {
+        background-position: 120% 0;
+    }
+    100% {
+        background-position: -120% 0;
+    }
 }
 
 .poster-sheen {

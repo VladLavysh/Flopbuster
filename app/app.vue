@@ -174,29 +174,6 @@ const wait = (ms: number) =>
         setTimeout(resolve, ms);
     });
 
-async function waitForImageReady(
-    imageUrl: string,
-    retries = 12,
-    delayMs = 1000,
-): Promise<void> {
-    for (let attempt = 0; attempt <= retries; attempt += 1) {
-        try {
-            await new Promise<void>((resolve, reject) => {
-                const img = new Image();
-                img.onload = () => resolve();
-                img.onerror = () => reject(new Error("Image not ready"));
-                img.src = imageUrl;
-            });
-            return;
-        } catch {
-            if (attempt === retries) {
-                return;
-            }
-            await wait(delayMs);
-        }
-    }
-}
-
 function scrollToTheBottom() {
     if (window.innerWidth <= 1023) {
         window.scrollTo({
@@ -251,9 +228,8 @@ async function finishPoster(imageUrl: string, poster: PosterResponse) {
         genre: selectedGenre.value,
     };
 
-    await wait(3000);
+    await wait(2000);
     currentLoadingStep.value = 3;
-    await waitForImageReady(imageUrl);
 
     posterHistory.value = [
         ...posterHistory.value,
