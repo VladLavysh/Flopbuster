@@ -7,6 +7,11 @@ import {
   TROLL_MESSAGE,
   TROLL_POSTER,
 } from "../../shared/poster-guard";
+import {
+  checkSuccessfulLlmRateLimit,
+  getRateLimitKey,
+  recordSuccessfulLlmHit,
+} from "../utils/rate-limit";
 
 const posterReviewSchema = z.object({
   title: z
@@ -50,6 +55,16 @@ export default defineEventHandler(async (event) => {
     };
   }
 
+  const rateLimitKey = getRateLimitKey(event);
+  const rateLimit = checkSuccessfulLlmRateLimit(rateLimitKey);
+
+  if (!rateLimit.allowed) {
+    throw createError({
+      statusCode: 429,
+      statusMessage: `Too many posters generated. Limit is 3 successful generations per 10 minutes — try again in about ${rateLimit.retryAfterSec} seconds.`,
+    });
+  }
+
   try {
     const { output } = await generateText({
       model: google("gemini-2.5-flash"),
@@ -76,9 +91,12 @@ ${reviewText}
 </customer_review>`,
         },
       ],
-      allowSystemInMessages: false,    });
+      allowSystemInMessages: false,
+    });
 
     output.imagePrompt = output.imagePrompt.replace(/["'#?&]/g, "").trim();
+
+    recordSuccessfulLlmHit(rateLimitKey);
 
     return {
       statusCode: 200,

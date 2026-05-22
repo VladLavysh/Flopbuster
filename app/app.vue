@@ -297,20 +297,30 @@ async function generatePoster() {
         const imageUrl = buildPollinationsImageUrl(data.imagePrompt);
         await finishPoster(imageUrl, data);
     } catch (error: any) {
+        const statusCode = error?.statusCode ?? error?.status;
         const description =
             error?.data?.statusMessage ||
             error?.statusMessage ||
             error?.message ||
             "Failed to generate poster. Please try again.";
 
+        const isRateLimited = statusCode === 429;
+
         toast.add({
-            title: "Poster generation failed",
+            title: isRateLimited
+                ? "Slow down, Spielberg"
+                : "Poster generation failed",
             description,
-            color: "error",
-            icon: "i-heroicons-exclamation-triangle",
+            color: isRateLimited ? "warning" : "error",
+            icon: isRateLimited
+                ? "i-heroicons-clock"
+                : "i-heroicons-exclamation-triangle",
         });
 
-        setErrorFallbackPoster();
+        if (!isRateLimited) {
+            setErrorFallbackPoster();
+        }
+
         console.error("Generation failed:", error);
     } finally {
         stopLoadingTimer();
