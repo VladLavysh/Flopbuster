@@ -1,6 +1,13 @@
 <script setup lang="ts">
 import { toPng } from "html-to-image";
 
+import {
+    buildPollinationsImageUrl,
+    detectInjection,
+    TROLL_IMAGE_URL,
+    TROLL_MESSAGE,
+    TROLL_POSTER,
+} from "#shared/poster-guard";
 import type {
     Genre,
     PosterData,
@@ -20,6 +27,7 @@ interface EndpointResponse {
     data: PosterResponse;
     statusCode: number;
     statusMessage: string;
+    trolled?: boolean;
 }
 
 const reviewText = ref("");
@@ -224,66 +232,94 @@ function setErrorFallbackPoster() {
     };
 }
 
+function showTrollToast(description = TROLL_MESSAGE) {
+    toast.add({
+        title: "Prompt injection detected",
+        description,
+        color: "warning",
+        icon: "i-heroicons-face-smile",
+    });
+}
+
+async function finishPoster(imageUrl: string, poster: PosterResponse) {
+    posterData.value = {
+        title: poster.title,
+        tagline: poster.tagline,
+        releaseDate: poster.releaseDate,
+        imageUrl,
+        reviewText: reviewText.value,
+        genre: selectedGenre.value,
+    };
+
+    await wait(3000);
+    currentLoadingStep.value = 3;
+    await waitForImageReady(imageUrl);
+
+    posterHistory.value = [
+        ...posterHistory.value,
+        {
+            id: Date.now(),
+            ...posterData.value,
+        },
+    ].slice(0, 10);
+}
+
+function showTrollPoster(toastDescription = TROLL_MESSAGE) {
+    stopLoadingTimer();
+    isLoading.value = false;
+    currentLoadingStep.value = 1;
+
+    showTrollToast(toastDescription);
+    scrollToTheBottom();
+
+    posterData.value = {
+        title: TROLL_POSTER.title,
+        tagline: TROLL_POSTER.tagline,
+        releaseDate: TROLL_POSTER.releaseDate,
+        imageUrl: TROLL_IMAGE_URL,
+        reviewText: reviewText.value,
+        genre: selectedGenre.value,
+    };
+}
+
 async function generatePoster() {
     if (!canGenerate.value) return;
 
+    if (detectInjection(reviewText.value)) {
+        showTrollPoster();
+        return;
+    }
+
     pickRandomStepText();
-
     startLoadingTimer();
-
     scrollToTheBottom();
-
     posterData.value = null;
     isLoading.value = true;
     currentLoadingStep.value = 1;
 
     try {
-        const {
-            data,
-            statusCode,
-            statusMessage,
-        }: {
-            data: PosterResponse;
-            statusCode: number;
-            statusMessage: string;
-        } = await $fetch<EndpointResponse>("/api/generate-prompt", {
-            method: "POST",
-            body: {
-                reviewText: reviewText.value,
-                genre: selectedGenre.value,
-                currentDateISO: new Date().toISOString(),
-            },
-        });
+        const { data, statusCode, statusMessage, trolled } =
+            await $fetch<EndpointResponse>("/api/generate-prompt", {
+                method: "POST",
+                body: {
+                    reviewText: reviewText.value,
+                    genre: selectedGenre.value,
+                    currentDateISO: new Date().toISOString(),
+                },
+            });
 
         if (statusCode >= 400) {
             throw new Error(statusMessage);
         }
 
+        if (trolled) {
+            showTrollPoster(statusMessage);
+            return;
+        }
+
         currentLoadingStep.value = 2;
-
-        const generatedImageUrl = `https://image.pollinations.ai/p/${encodeURIComponent(data.imagePrompt)}?width=800&height=1200&enhanced=true&model=flux&_ts=${Date.now()}`;
-
-        posterData.value = {
-            title: data.title,
-            tagline: data.tagline,
-            releaseDate: data.releaseDate,
-            imageUrl: generatedImageUrl,
-            reviewText: reviewText.value,
-            genre: selectedGenre.value,
-        };
-
-        await wait(3000); // Artificial delay due to unpredictable Pollinations.ai response times
-        currentLoadingStep.value = 3;
-
-        await waitForImageReady(generatedImageUrl);
-
-        posterHistory.value = [
-            ...posterHistory.value,
-            {
-                id: Date.now(),
-                ...posterData.value,
-            },
-        ].slice(0, 10);
+        const imageUrl = buildPollinationsImageUrl(data.imagePrompt);
+        await finishPoster(imageUrl, data);
     } catch (error: any) {
         const description =
             error?.data?.statusMessage ||
