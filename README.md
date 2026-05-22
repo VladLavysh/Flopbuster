@@ -2,8 +2,6 @@
 
 A rapid full-stack proof-of-concept (PoC) that transforms terrible customer reviews into dramatic, cinematic Hollywood movie posters. Built as a lightweight, highly responsive MVP demonstrating advanced AI pipeline orchestration and sleek reactive UX.
 
-🔗 **Live Demo:** [https://tw-home-assignment.vercel.app]
-
 ---
 
 ## 🚀 Tech Stack
